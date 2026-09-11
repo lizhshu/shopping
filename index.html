@@ -522,6 +522,23 @@
             }
         }
 
+        // -------------------- 默认高亮的 Product code --------------------
+        const DEFAULT_BOLD_CODES = new Set([
+            "S0301802",
+            "S0301803",
+            "F8708500",
+            "F8708300",
+            "E3569502",
+            "E2978004",
+            "LF485400",
+            "F8281100",
+            "E4166601",
+            "G4657901",
+            "S2396603",
+            "L4349207",
+            "S1305804"
+        ]);
+
         // -------------------- 渲染表格 --------------------
         function renderTable(headers, rows) {
             tableThead.innerHTML = '';
@@ -535,28 +552,40 @@
             });
             tableThead.appendChild(trHead);
 
-            rows.forEach(row => {
-                const tr = document.createElement('tr');
-                for (let i = 0; i < headers.length; i++) {
-                    const cellVal = row[i];
-                    const td = document.createElement('td');
-                    td.innerText = (cellVal === null || cellVal === undefined) ? '' : cellVal;
+        // 先找到 Product code 在表头中的索引
+        const codeIndex = headers.indexOf('Product code');
 
-                    td.addEventListener('click', function() {
-                        copyText(this.innerText);
-                    });
+        rows.forEach(row => {
+            const tr = document.createElement('tr');
 
-                    if (i === 0) {
-                        td.addEventListener('click', function(e) {
-                            e.stopPropagation();
-                            tr.classList.toggle('row-bold');
-                        });
-                    }
-
-                    tr.appendChild(td);
+            // 判断这一行是否需要默认加粗
+            if (codeIndex !== -1) {
+                const codeVal = String(row[codeIndex] ?? '').trim();
+                if (DEFAULT_BOLD_CODES.has(codeVal)) {
+                    tr.classList.add('row-bold');
                 }
-                tableTbody.appendChild(tr);
-            });
+            }
+
+            for (let i = 0; i < headers.length; i++) {
+                const cellVal = row[i];
+                const td = document.createElement('td');
+                td.innerText = (cellVal === null || cellVal === undefined) ? '' : cellVal;
+
+                td.addEventListener('click', function() {
+                    copyText(this.innerText);
+                });
+
+                if (i === 0) {
+                    td.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        tr.classList.toggle('row-bold');
+                    });
+                }
+
+                tr.appendChild(td);
+            }
+            tableTbody.appendChild(tr);
+        });
 
             applyZoom(currentZoom);
         }
