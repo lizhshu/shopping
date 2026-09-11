@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes">
+    <title>表格点击复制</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        }
+        body {
+            background: #f5f7fa;
+            padding: 16px;
+            /* 允许手势缩放 (viewport已设置) */
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header-area {
+            margin-bottom: 12px;
+        }
+        h1 {
+            font-size: 1.3rem;
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+        /* 控制栏: 上传 + 按钮 + 缩放按钮 */
+        .control-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px 12px;
+            background: #fff;
+            padding: 14px 16px;
+            border-radius: 10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            margin-bottom: 16px;
+        }
+        #fileInput {
+            font-size: 0.9rem;
+            max-width: 200px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+        .btn:hover {
+            background: #1d4ed8;
+        }
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+        .btn-secondary:hover {
+            background: #cbd5e1;
+        }
+        .zoom-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto; /* 靠右对齐 */
+        }
+        .zoom-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            font-size: 1.5rem;
+            font-weight: 400;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #1e293b;
+            transition: all 0.15s;
+            user-select: none;
+        }
+        .zoom-btn:hover {
+            background: #f1f5f9;
+            border-color: #94a3b8;
+        }
+        .zoom-btn:active {
+            background: #e2e8f0;
+            transform: scale(0.96);
+        }
+        .zoom-level {
+            font-size: 0.9rem;
+            min-width: 48px;
+            text-align: center;
+            color: #334155;
+            font-weight: 500;
+        }
+        .table-scroll-wrap {
+            overflow-x: auto;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            /* 增加平滑滚动 */
+            -webkit-overflow-scrolling: touch;
+            /* 表格缩放通过内部 table 的 zoom 或 transform 实现，这里使用 font-size 方案或 zoom 属性；
+               为了不影响布局滚动，我们将缩放作用于表格本身 */
+        }
+        table {
+            border-collapse: collapse;
+            min-width: 100%;
+            width: max-content; /* 让表格根据内容自适应宽度 */
+            transition: font-size 0.1s ease;
+        }
+        th, td {
+            border: 1px solid #d1d5db;
+            padding: 10px 12px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        th {
+            background: #e2e8f0;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        td:hover {
+            background: #dbeafe;
+        }
+
+        /* Toast弹窗 */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1f2937;
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 10px;
+            z-index: 9999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s;
+            font-size: 0.95rem;
+            max-width: 85vw;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .toast.show {
+            opacity: 1;
+        }
+        /* 小屏适配 */
+        @media (max-width: 640px) {
+            body {
+                padding: 10px;
+            }
+            .control-bar {
+                padding: 12px;
+                gap: 8px;
+            }
+            .btn {
+                padding: 8px 12px;
+                font-size: 0.85rem;
+            }
+            .zoom-btn {
+                width: 36px;
+                height: 36px;
+                font-size: 1.3rem;
+            }
+            .zoom-group {
+                margin-left: 0;
+                width: 100%;
+                justify-content: flex-end;
+            }
+            h1 {
+                font-size: 1.1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header-area">
+        <h1>📋 表格点击复制工具 · 支持缩放</h1>
+    </div>
+
+    <!-- 控制栏：上传、加载演示、缩放按钮 -->
+    <div class="control-bar">
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+        <button class="btn" id="loadDemoBtn">加载演示List数据</button>
+
+        <!-- 缩放控制组 -->
+        <div class="zoom-group">
+            <button class="zoom-btn" id="zoomOutBtn" title="缩小表格">−</button>
+            <span class="zoom-level" id="zoomLevelDisplay">100%</span>
+            <button class="zoom-btn" id="zoomInBtn" title="放大表格">+</button>
+        </div>
+    </div>
+
+    <!-- 表格容器，点击单元格复制 -->
+    <div class="table-scroll-wrap" id="tableWrap">
+        <table id="dataTable">
+            <thead></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    (function() {
+        // -------------------- DOM 元素 --------------------
+        const toastEl = document.getElementById('toast');
+        const tableThead = document.querySelector('#dataTable thead');
+        const tableTbody = document.querySelector('#dataTable tbody');
+        const dataTable = document.getElementById('dataTable');
+        const zoomLevelDisplay = document.getElementById('zoomLevelDisplay');
+        const zoomInBtn = document.getElementById('zoomInBtn');
+        const zoomOutBtn = document.getElementById('zoomOutBtn');
+
+        // -------------------- 缩放状态 --------------------
+        // 通过设置表格的基础字号缩放表格，因为所有尺寸都用rem/px，改font-size可以整体缩放
+        // 使用百分数 100% 基准字体 16px (默认)，但我们可以直接设置 table 的 font-size
+        // 为了不影响其他元素，我们给表格内 th/td 设置相对字体？更简单: 直接缩放 table 的 transform 不太合适因为滚动条。
+        // 采用修改 table 的 zoom 属性(有兼容性)或直接修改 font-size。
+        // 这里我们使用 font-size 方案，给 table 设置基准字体，th/td 都用 em 或 inherit 继承？但当前 CSS 中 th/td 没有设置 font-size，会继承table的 font-size。
+        // 我们给 table 设置 font-size 基准，这样所有文本都跟随缩放。
+        // 但要注意 padding 也会受 em 影响？padding 是 px，不会缩放，表格尺寸变化不大。
+        // 更理想的是用 transform: scale() 但影响布局；或者使用 zoom，但 zoom 在 Firefox 不支持。
+        // 为了兼容性和体验，我们采用修改基础字号 + 可选的 padding 调整？保持简单：只缩放字号，对于文字内容来说已经足够。
+        // 但用户希望的是“放大缩小表格”，实际上字体放大后单元格可能会变宽/高，但 padding 固定可能显得不协调。
+        // 升级方案：同时调整 padding 也可以，但代码复杂。这里为了快速满足需求，用 CSS 变量控制 font-size 和 padding。
+        // 更优雅：使用 CSS 自定义属性 --table-scale，在 table 上应用 zoom？ 使用 zoom 属性 + transform 备选。
+        // 考虑到现代浏览器（Chrome, Edge, Safari, Firefox 126+ 已支持 zoom），我们可以用 zoom。但为了最大兼容，还是用 font-size + padding 调整。
+        // 我们采用动态修改 table 的 font-size 和 th/td 的 padding 比例(基于字体大小) 但 padding 是固定px。
+        // 为了避免布局突变，我们用 em 重写 padding 吗？太麻烦。折中：用 `zoom` 属性，降级为 `transform`。
+        // 经过测试，zoom 属性在 Chrome/Safari/Edge 中效果很好，且不影响滚动容器。Firefox 不支持 zoom，但可以用 transform: scale + transform-origin。
+        // 为了代码简洁，我们使用 zoom 属性，并为 Firefox 添加一个警告或忽略。但是用户手机端主要是 Chrome/Safari 支持良好。
+        // 并且现在 Firefox 126+ 也支持 zoom 了。所以我们用 `zoom`，简单强大。
+
+        let currentZoom = 1.0; // 1 = 100%
+        const ZOOM_STEP = 0.1;
+        const MIN_ZOOM = 0.5;
+        const MAX_ZOOM = 2.5;
+
+        // 应用缩放 (使用 zoom 属性，兼容性较好)
+        function applyZoom(zoomValue) {
+            // 限定范围
+            zoomValue = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomValue));
+            currentZoom = zoomValue;
+
+            // 使用 zoom 属性缩放表格 (Chrome, Safari, Edge, Firefox 126+ 支持)
+            dataTable.style.zoom = currentZoom;
+
+            // 对于不支持 zoom 的旧版 Firefox，我们可以用 transform 作为备选但复杂，这里不做处理。
+            // 但为了有备选，可以检查 CSS.supports('zoom', '1')，如果不支持，则用 transform。
+            // 简单起见，我们直接使用 zoom。目前主流移动端浏览器都支持。
+            // 但为了更稳健，同时设置 transform 会重叠，不设置了。
+
+            // 更新显示
+            zoomLevelDisplay.textContent = Math.round(currentZoom * 100) + '%';
+        }
+
+        // 放大
+        function zoomIn() {
+            applyZoom(currentZoom + ZOOM_STEP);
+        }
+
+        // 缩小
+        function zoomOut() {
+            applyZoom(currentZoom - ZOOM_STEP);
+        }
+
+        // 绑定缩放事件
+        zoomInBtn.addEventListener('click', zoomIn);
+        zoomOutBtn.addEventListener('click', zoomOut);
+
+        // 初始缩放 100%
+        applyZoom(1.0);
+
+        // 监听键盘? 不用。
+
+        // -------------------- Toast 提示 --------------------
+        let toastTimer = null;
+        function showToast(msg) {
+            toastEl.textContent = msg;
+            toastEl.classList.add('show');
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                toastEl.classList.remove('show');
+            }, 1800);
+        }
+
+        // -------------------- 复制文本 --------------------
+        async function copyText(text) {
+            const textStr = String(text);
+            try {
+                await navigator.clipboard.writeText(textStr);
+                showToast(`✅ 已复制：${textStr.length > 30 ? textStr.slice(0,30)+'…' : textStr}`);
+            } catch (err) {
+                // 降级方案
+                const ta = document.createElement('textarea');
+                ta.value = textStr;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                try {
+                    document.execCommand('copy');
+                    showToast(`✅ 已复制：${textStr.length > 30 ? textStr.slice(0,30)+'…' : textStr}`);
+                } catch (e) {
+                    showToast('❌ 复制失败，请手动复制');
+                } finally {
+                    document.body.removeChild(ta);
+                }
+            }
+        }
+
+        // -------------------- 渲染表格 (支持缩放不影响) --------------------
+        function renderTable(headers, rows) {
+            // 清空
+            tableThead.innerHTML = '';
+            tableTbody.innerHTML = '';
+
+            // 表头
+            const trHead = document.createElement('tr');
+            headers.forEach(h => {
+                const th = document.createElement('th');
+                th.innerText = (h === null || h === undefined) ? '' : h;
+                trHead.appendChild(th);
+            });
+            tableThead.appendChild(trHead);
+
+            // 数据行
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+                // 确保每一行都跟headers等长，不足补空
+                for (let i = 0; i < headers.length; i++) {
+                    const cellVal = row[i];
+                    const td = document.createElement('td');
+                    td.innerText = (cellVal === null || cellVal === undefined) ? '' : cellVal;
+                    td.addEventListener('click', function() {
+                        copyText(this.innerText);
+                    });
+                    tr.appendChild(td);
+                }
+                tableTbody.appendChild(tr);
+            });
+
+            // 每次渲染后维持当前缩放 (重新应用)
+            applyZoom(currentZoom);
+        }
+
+        // -------------------- 文件上传解析 --------------------
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                try {
+                    const workbook = XLSX.read(ev.target.result, { type: 'binary' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+                    if (jsonData.length < 1) {
+                        showToast("表格无数据");
+                        return;
+                    }
+                    const headers = jsonData[0].map(h => (h === null || h === undefined) ? '' : h);
+                    const bodyRows = jsonData.slice(1);
+                    renderTable(headers, bodyRows);
+                    showToast("📂 文件加载完成");
+                } catch (err) {
+                    console.error(err);
+                    showToast("❌ 解析文件失败，请检查格式");
+                }
+            };
+            reader.readAsBinaryString(file);
+            // 清空input，以便再次上传同一文件可触发
+            e.target.value = '';
+        });
+
+        // -------------------- 内置演示数据 --------------------
+        const demoHeaders = [
+            "分类", "Brand Name (CN)", "Category", "Product code", "Product Name (CN)",
+            "Product Name (EN)", "Bar code", "Gross weight(g)", "RSP", "Discount",
+            "Employee price", "Quota(units/employee)", "Expiration date", "Package", "已购入"
+        ];
+
+        const demoRows = [
+            ["1","科颜氏","Skin Care","S0301802","科颜氏婴儿营养舒润保湿霜 200ml","BABY CREAM 200ML","3605975079258","231","295","0.3","88.5","88.5","2027/6/1","外包装可能破损","1"],
+            ["1","科颜氏","Skin Care","S0301803","科颜氏婴儿营养舒润保湿霜 200ml","BABY CREAM 200ML CSAR","3605975079258","231","295","0.3","88.5","88.5","2027/4/1","外包装可能破损","1"],
+            ["2","欧珑","无火香薰 DIFFUSER","F8708500","欧珑圆形车载香熏随行装 雪松之恋2.2G","ACP Diffuser refill Cedre 2.2g CN","6902395981794","163","200","0.3","96","96","2030/9/1","包装完好","2"],
+            ["2","欧珑","无火香薰 DIFFUSER","F8708300","欧珑圆形车载香熏随行装 赤霞橘光2.2G","ACP Diffuser refill Orange 2.2g CN","6902395981770","163","200","0.3","96","96","2030/9/1","包装完好","2"],
+            ["2","欧珑","无火香薰 DIFFUSER","F8708400","欧珑圆形车载香熏随行装 茶花香颂2.2G","ACP Diffuser refill Camelia 2.2g CN","6902395981787","163","200","0.3","96","96","2030/9/1","包装完好","2"],
+            ["2","欧珑","无火香薰 DIFFUSER","F8725800","欧珑金属车载香氛扩香套装 茶花香颂5G","ACP Ber Diffuser Set Camelia 5g CN","6902395982661","236","580","0.3","174","","2030/11/1","包装完好","2"],
+            ["2","欧珑","无火香薰 DIFFUSER","F8725900","欧珑金属车载香氛扩香套装 赤霞橘光5G","ACP Ber Diffuser Set Orange 5g CN","6902395982678","236","580","0.3","174","","2030/11/1","包装完好","2"],
+            ["2","欧珑","无火香薰 DIFFUSER","F8726000","欧珑金属车载香氛扩香套装 雪松之恋5G","ACP Ber Diffuser Set Cedre 5g CN","6902395982685","236","580","0.3","174","","2030/11/1","包装完好","2"],
+            ["3","巴黎欧莱雅沙龙专属","洗护 Haircare","E3569502","LorealPro专业沙龙芯盈水漾洗发水 500ml","LP SE21 Pro Lng Shp 500ml CSAR VG","6134746369758","535","483","0.3","211","15","2028/5/1","包装完好","3"],
+            ["3","巴黎欧莱雅沙龙专属","洗护 Haircare","E3569501","沙龙洗护系列芯盈水漾洗发水 500ml","LP SE21 Pro Lng Shp 500ml R VG","6134746369758","535","483","0.3","211","15","2028/4/1","包装完好","3"],
+            ["3","巴黎欧莱雅","洗护 Haircare","G3082510","欧莱雅精油润养洗发露 700ml","S ELS ArganNour SHP RN 700mL RP CN","6955818202372","766","790","0.3","242","","2029/5/10","部分外包装破损","3"],
+            ["3","卡诗","洗护 Hair care","E3021106","卡诗黑钻钥源系列洗发水 250ml","K CHRONO BAIN 250ML V3","5234746367282","682","983","0.3","51","112","2028/6/1","外包装可能破损","3"],
+            ["3","卡诗","洗护 Hair care","E3021100","卡诗黑钻钥源系列洗发水 250ml","KER CHRONO BAIN 250ML V3","5234746367282","682","983","0.3","51","112","2028/5/1","外包装可能破损","3"],
+            ["3","卡诗","洗护 Hair care","E3021105","卡诗黑钻钥源系列洗发水 250ml","K CHRONO BAIN 250ML CSAR V3","5234746367282","682","983","0.3","51","112","2028/5/1","外包装可能破损","3"],
+            ["3","卡诗","洗护 Hair care","E4039700","卡诗滋养奢护柔光洗发水 500ml","","","","","0.5","230","","2028/9/1","包装完好","3"],
+            ["3","卡诗","洗护 Hair care","E4039702","卡诗滋养奢护柔光洗发水 500ml","","","","","0.5","230","","2029/4/12","包装完好","3"],
+            ["3","卡诗","洗护 Hair care","E4398401","卡诗釉光玫瑰莹润洗发水 500ml","","","","","0.4","184","","2029/2/17","外包装可能破损","3"],
+            ["3","卡诗","洗护 Hair care","E4398101","卡诗釉光玫瑰莹润洗发水 250ml","","","","","0.4","116","","2029/2/1","外包装可能破损","3"],
+            ["3","卡诗","洗护 Hair care","E4398100","卡诗釉光玫瑰莹润洗发水 250ml","","","","","0.4","116","","2028/7/1","外包装可能破损","3"],
+            ["3","卡诗","洗护 Hair care","E4398400","卡诗釉光玫瑰莹润洗发水 500ml","","","","","0.4","184","","2028/2/1","外包装可能破损","3"],
+            ["3","植村秀","美发洗护 Hair care","E4334300","植村秀美发明日叶释能焕活洗发水 300ml","","","","","0.3","108","","2028/2/1","外包装可能破损","3"],
+            ["3","植村秀","美发洗护 Hair care","E2665703","植村秀美发米萃密集修护洗发水 300ml","","","","","0.3","101","","2028/2/29","外包装可能破损","3"],
+            ["3","植村秀","美发洗护 Hair care","E2665704","植村秀美发米萃密集修护洗发水 300ml","","","","","0.3","101","","2028/5/1","外包装可能破损","3"],
+            ["4","卡诗","洗护 Hair care","E2978004","卡诗新黑钻钥源发膜 200ml","","","","","0.4","236","236","2028/2/1","包装完好","4"],
+            ["4","巴黎欧莱雅","洗护 Haircare","G2962506","欧莱雅精油润养润发乳 700ml","","","","","0.3","24","24","2029/4/26","部分外包装破损","4"],
+            ["4","巴黎欧莱雅","洗护 Haircare","G3238805","欧莱雅精油润养润发乳 500ml","","","","","0.3","17","","2029/3/5","部分外包装破损","4"],
+            ["4","巴黎欧莱雅","洗护 Haircare","ZCN13493","精油润养洗发露400mlX2+精油润养润发乳400ml","","","","","0.3","41","","2028/3/5","部分外包装破损","4"],
+            ["4","卡诗","洗护 Hair care","E3594401","卡诗赋源芯丝奢护精华霜 200ml","","","","","0.5","185","","2028/4/1","外包装可能破损","4"],
+            ["4","卡诗","洗护 Hair care","E4068100","卡诗滋养奢护顺滑精华霜 200ml","","","","","0.5","185","","2028/5/1","包装完好","4"],
+            ["4","卡诗","洗护 Hair care","E1927103","卡诗新强韧奢护精华霜 200ml","","","","","0.5","185","","2028/11/1","外包装可能破损","4"],
+            ["5","欧珑","身体护理 Body","LF485400","欧珑沐浴露 情柚独钟 200ml","","","","","0.3","96","96","2028/6/29","外包装可能破损","5"],
+            ["5","欧珑","身体护理 Body","LD794301","欧珑沐浴露 赤霞橘光 200ml","","","","","0.3","96","","2028/2/1","外包装可能破损","5"],
+            ["6","植村秀","彩妆 Makeup","F8281100","植村秀羽纱哑光定妆喷雾 草木香 100ml","","","","","0.3","90","90","2027/4/1","外包装可能破损","6"],
+            ["6","植村秀","彩妆 Makeup","F7350003","植村秀羽纱持妆定妆喷雾 100ml","","","","","0.3","90","","2028/6/1","外包装可能破损","6"],
+            ["6","植村秀","彩妆 Makeup","F7350002","植村秀羽纱持妆定妆喷雾 100ml","","","","","0.3","90","","2027/4/1","外包装可能破损","6"],
+            ["6","植村秀","彩妆 Makeup","F8299900","植村秀羽纱持妆定妆喷雾 100ml","","","","","0.3","89","","2027/4/1","外包装可能破损","6"],
+            ["7","卡诗","洗护 Hair care","E4166601","卡诗山茶花经典香氛护发油 75ml","","","","","0.5","230","230","2028/11/1","外包装可能破损","7"],
+            ["7","卡诗","洗护 Hair care","E4496300","卡诗山茶花经典香氛护发油 75ml","","","","","0.5","230","","2028/7/1","外包装可能破损","7"],
+            ["7","卡诗","洗护 Hair care","E4180801","卡诗新黑钻钥源香氛护发油 30ml","","","","","0.5","51","87","2028/10/1","外包装可能破损","7"],
+            ["7","卡诗","洗护 Hair care","E4405501","卡诗釉光玫瑰护发油 45ml","","","","","0.4","128","","2028/12/31","包装完好","7"],
+            ["7","卡诗","洗护 Hair care","E4405500","卡诗釉光玫瑰护发油 45ml","","","","","0.4","128","","2028/6/30","外包装可能破损","7"],
+            ["7","卡诗","洗护 Hair care","E4181400","卡诗雪绒花香氛护发油 75ml","","","","","0.5","230","","2028/8/1","外包装可能破损","7"],
+            ["7","卡诗","洗护 Hair care","E4182500","卡诗积雪草香氛护发油 30ml","","","","","0.5","125","","2028/2/1","外包装可能破损","7"],
+            ["7","卡诗","洗护 Hair care","E4182000","卡诗奥丽顺柔香氛护发油 75ml","","","","","0.5","230","","2028/12/1","包装完好","7"],
+            ["7","卡诗","洗护 Hair care","E4182600","卡诗积雪草香氛护发油 75ml","","","","","0.5","230","","2028/7/1","包装完好","7"],
+            ["8","美宝莲","彩妆 Makeup","G4657901","美宝莲纽约极细防晕眼线液 冷萃茶棕 400mg","","","","","0.25","29","29","2028/9/1","外包装可能破损","8"],
+            ["8","美宝莲","彩妆 Makeup","G4657900","美宝莲纽约极细防晕眼线液 冷萃茶棕 400mg","","","","","0.25","29","","2028/3/1","外包装可能破损","8"],
+            ["9","拉夫劳伦","香水 Perfume","S2396603","拉夫劳伦罗曼淡香精 50ml","","","","","0.3","207","207","2028/7/1","外包装可能破损","9"],
+            ["9","拉夫劳伦","香水 Perfume","S6120100","拉夫劳伦地球系列香氛 冷杉之境 100ml","","","","","0.3","306","","2028/3/31","外包装可能破损","9"],
+            ["10","碧欧泉","护肤 Skin Care","L4349207","碧欧泉男士全新水感活力沐浴露 200ml","","","","","0.3","59","89","2028/1/1","外包装可能破损","10"],
+            ["10","科颜氏","Hygiene","S1305804","科颜氏婴儿温和洗发沐浴啫喱 250ml","","","","","0.3","66","66","2027/4/1","外包装可能破损","10"]
+        ];
+
+        // 加载演示按钮
+        document.getElementById('loadDemoBtn').addEventListener('click', function() {
+            renderTable(demoHeaders, demoRows);
+            showToast("📦 演示 List 数据已加载");
+            // 重置缩放为100%方便查看
+            applyZoom(1.0);
+        });
+
+        // 页面加载完成显示欢迎，但不自动加载演示（让用户选择）
+        window.addEventListener('load', function() {
+            // 可选：初始时显示空白或演示？为了不干扰，留空
+            // 但也可以显示一个简单提示
+            showToast("点击单元格即可复制内容");
+        });
+
+        // 为兼容触摸设备，防止双击缩放干扰 (保留)
+        // 注意: viewport 已经允许缩放, 单元格点击复制正常
+    })();
+</script>
+</body>
+</html>
